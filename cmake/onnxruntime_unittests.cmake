@@ -603,6 +603,10 @@ if(onnxruntime_USE_DML)
   list(APPEND onnxruntime_test_providers_dependencies onnxruntime_providers_dml)
 endif()
 
+if(onnxruntime_USE_NVDML)
+  list(APPEND onnxruntime_test_providers_dependencies  onnxruntime_providers_nvdml)
+endif()
+
 if(onnxruntime_USE_DNNL)
   list(APPEND onnxruntime_test_providers_dependencies onnxruntime_providers_dnnl)
 endif()

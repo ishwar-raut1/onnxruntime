@@ -634,6 +634,7 @@ def parse_arguments():
         help="Specify the generator that CMake invokes.",
     )
     parser.add_argument("--use_dml", action="store_true", help="Build with DirectML.")
+    parser.add_argument("--use_nvdml", action="store_true", help="Build with NVDML.")
     parser.add_argument(
         "--dml_path",
         type=str,
@@ -1060,6 +1061,7 @@ def generate_build_tree(
         ),
         "-Donnxruntime_REDUCED_OPS_BUILD=" + ("ON" if is_reduced_ops_build(args) else "OFF"),
         "-Donnxruntime_USE_DML=" + ("ON" if args.use_dml else "OFF"),
+        "-Donnxruntime_USE_NVDML=" + ("ON" if args.use_nvdml else "OFF"),
         "-Donnxruntime_USE_WINML=" + ("ON" if args.use_winml else "OFF"),
         "-Donnxruntime_BUILD_MS_EXPERIMENTAL_OPS=" + ("ON" if args.ms_experimental else "OFF"),
         "-Donnxruntime_USE_TELEMETRY=" + ("ON" if args.use_telemetry else "OFF"),
@@ -1841,7 +1843,7 @@ def setup_migraphx_vars(args):
 
 
 def setup_dml_build(args, cmake_path, build_dir, configs):
-    if not args.use_dml:
+    if not (args.use_dml or args.use_nvdml):
         return
 
     if args.dml_path:

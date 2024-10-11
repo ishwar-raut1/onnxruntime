@@ -217,6 +217,7 @@ set(onnxruntime_INTERNAL_LIBRARIES
   ${PROVIDERS_WEBGPU}
   ${PROVIDERS_WEBNN}
   ${PROVIDERS_AZURE}
+  ${PROVIDERS_NVDML}
   ${PROVIDERS_INTERNAL_TESTING}
   ${onnxruntime_winml}
   onnxruntime_optimizer
