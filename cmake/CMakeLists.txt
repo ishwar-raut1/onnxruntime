@@ -1541,14 +1541,6 @@ if (onnxruntime_USE_DML)
   include(dml)
 endif()
 
-# if (onnxruntime_USE_NVDML)
-#   if (NOT WIN32)
-#     message(FATAL_ERROR "The NVDML execution provider is .")
-#   endif()
-
-#   include(dml)
-# endif()
-
 if (onnxruntime_ENABLE_TRAINING_APIS)
   add_compile_definitions(ENABLE_TRAINING_CORE)
   add_compile_definitions(ENABLE_TRAINING_APIS)
