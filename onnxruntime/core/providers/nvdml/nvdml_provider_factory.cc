@@ -32,7 +32,13 @@ struct NvDmlProviderFactory : IExecutionProviderFactory {
 };
 
 std::unique_ptr<IExecutionProvider> NvDmlProviderFactory::CreateProvider() {
-  auto provider = std::make_unique<NvDml::NvDmlExecutionProvider>(dml_device_, cmd_queue_);
+
+  ComPtr<ID3D12Device> d3d12_device;
+  ORT_THROW_IF_FAILED(cmd_queue_->GetDevice(IID_PPV_ARGS(&d3d12_device)));
+
+  auto context = wil::MakeOrThrow<Dml::ExecutionContext>(d3d12_device.Get(), dml_device_, cmd_queue_, true, true);
+
+  auto provider = std::make_unique<NvDml::NvDmlExecutionProvider>(d3d12_device.Get(), cmd_queue_, context.Get());
   return provider;
 }
 
