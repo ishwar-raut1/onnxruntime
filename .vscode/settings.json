@@ -122,6 +122,7 @@
         "xtree": "cpp",
         "xutility": "cpp",
         "pointers": "cpp",
-        "*.inc": "cpp"
+        "*.inc": "cpp",
+        "resumable": "cpp"
     }
 }

@@ -15,6 +15,7 @@
 #include "NvDmlExecutionProvider.h"
 
 #include "core/session/abi_session_options_impl.h"
+#include "core/providers/dml/dml_provider_factory_creator.h"
 
 namespace onnxruntime {
 
@@ -37,8 +38,9 @@ std::unique_ptr<IExecutionProvider> NvDmlProviderFactory::CreateProvider() {
   ORT_THROW_IF_FAILED(cmd_queue_->GetDevice(IID_PPV_ARGS(&d3d12_device)));
 
   auto context = wil::MakeOrThrow<Dml::ExecutionContext>(d3d12_device.Get(), dml_device_, cmd_queue_, true, true);
-
+ORT_THROW_IF_FAILED(d3d12_device->SetPrivateDataInterface(dml_execution_context_guid, context.Get()));
   auto provider = std::make_unique<NvDml::NvDmlExecutionProvider>(d3d12_device.Get(), cmd_queue_, context.Get());
+
   return provider;
 }
 

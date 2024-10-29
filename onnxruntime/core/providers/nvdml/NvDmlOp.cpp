@@ -1,6 +1,8 @@
 #include "NvDmlOp.h"
 #include "NvDmlExecutionProvider.h"
 #include <d3dcompiler.h>
+
+#pragma comment(lib, "d3dcompiler.lib")
 namespace NvDml{
 
 void ExtractTensorInfo(const onnxruntime::NodeArg& node_arg, TensorDesc& tensor) {

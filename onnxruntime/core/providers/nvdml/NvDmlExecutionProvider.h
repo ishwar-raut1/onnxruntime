@@ -45,7 +45,7 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   }
 
   std::shared_ptr<onnxruntime::KernelRegistry> GetKernelRegistry() const final override {
-    return std::make_shared<onnxruntime::KernelRegistry>();
+    return m_kernelRegistry;
   }
 
   std::vector<std::unique_ptr<onnxruntime::ComputeCapability>>
@@ -57,6 +57,8 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   }
 
   onnxruntime::Status Sync() const final override {
+    context_->Flush();
+    context_->GetCurrentCompletionEvent().WaitForSignal(false);
     return Status::OK();
   }
 
@@ -65,6 +67,7 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   }
 
   Status OnRunEnd(bool /*sync_stream*/, const onnxruntime::RunOptions& /*run_options*/) final {
+    context_->Flush();
     return Status::OK();
   }
 
@@ -80,6 +83,7 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
     return d3d12_device_.Get();
   }
 
+  void NvDmlExecutionProvider::addOperatorToKernelRegistry();
 
 
   private:
@@ -90,7 +94,7 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   std::unique_ptr<Dml::BucketizedBufferAllocator> dml_allocator;
   std::unique_ptr<Dml::ReadbackHeap> readback_heap;
   std::unique_ptr<Dml::PooledUploadHeap> upload_heap;
-
+  std::shared_ptr<onnxruntime::KernelRegistry> m_kernelRegistry;
 
 };
 
