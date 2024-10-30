@@ -74,6 +74,10 @@ ProviderInfo_Dnnl* TryGetProviderInfo_Dnnl();
 #include "core/providers/dml/dml_provider_factory.h"
 const OrtDmlApi* GetOrtDmlApi(_In_ uint32_t version) NO_EXCEPTION;
 #endif
+#ifdef USE_NVDML
+#include "core/providers/nvdml/nvdml_provider_factory.h"
+const OrtNvDmlApi* GetOrtNvDmlApi(_In_ uint32_t version) NO_EXCEPTION;
+#endif
 
 #ifdef ENABLE_EXTENSION_CUSTOM_OPS
 #include "onnxruntime_extensions.h"
@@ -2197,6 +2201,14 @@ ORT_API_STATUS_IMPL(OrtApis::GetExecutionProviderApi,
     *provider_api = GetOrtDmlApi(version);
     if (*provider_api == nullptr) {
       return OrtApis::CreateStatus(ORT_INVALID_ARGUMENT, "Specified version is not supported for the DirectML provider.");
+    }
+    return NULL;
+  }
+
+  if (strcmp(provider_name, "NVDML") == 0) {
+    *provider_api = GetOrtNvDmlApi(version);
+    if (*provider_api == nullptr) {
+      return OrtApis::CreateStatus(ORT_INVALID_ARGUMENT, "Specified version is not supported for the NVDML provider.");
     }
     return NULL;
   }

@@ -8,6 +8,7 @@
 #include <wil/result.h>
 
 #include "core/providers/nvdml/nvdml_provider_factory.h"
+
 #include "core/session/allocator_adapters.h"
 #include "core/session/ort_apis.h"
 #include "core/framework/error_code_helper.h"
@@ -16,6 +17,9 @@
 
 #include "core/session/abi_session_options_impl.h"
 #include "core/providers/dml/dml_provider_factory_creator.h"
+
+#include "core/providers/dml/dml_provider_factory.h"
+const OrtDmlApi* GetOrtDmlApi(_In_ uint32_t version) NO_EXCEPTION;
 
 namespace onnxruntime {
 
@@ -58,4 +62,19 @@ ORT_API_STATUS_IMPL(OrtSessionOptionsAppendExecutionProvider_NVDML, _In_ OrtSess
                                                                                           cmd_queue));
   API_IMPL_END
   return nullptr;
+}
+
+
+OrtNvDmlApi::OrtNvDmlApi(const OrtDmlApi& base_api) {
+    // Copy the contents of base_api into this object
+    std::memcpy(static_cast<OrtDmlApi*>(this), &base_api, sizeof(OrtDmlApi));
+
+    // Assign the NVDML-specific function pointer
+    SessionOptionsAppendExecutionProvider_NVDML = OrtSessionOptionsAppendExecutionProvider_NVDML;
+  }
+
+// Singleton pattern for OrtNvDmlApi instance
+const OrtNvDmlApi* GetOrtNvDmlApi(_In_ uint32_t /*version*/) NO_EXCEPTION {
+  static OrtNvDmlApi api_instance(*GetOrtDmlApi(/*version=*/0));  // Copy OrtDmlApi into OrtNvDmlApi
+  return &api_instance;
 }
