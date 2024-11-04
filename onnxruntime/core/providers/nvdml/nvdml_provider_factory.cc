@@ -60,6 +60,9 @@ ORT_API_STATUS_IMPL(OrtSessionOptionsAppendExecutionProvider_NVDML, _In_ OrtSess
   API_IMPL_BEGIN
   options->provider_factories.push_back(onnxruntime::CreateExecutionProviderFactory_NvDml(dml_device,
                                                                                           cmd_queue));
+  const OrtDmlApi& ortDmlApi = *GetOrtDmlApi(/*version=*/0);
+  // Append the DirectML execution provider to the session options as NVDML depends on DML
+  ortDmlApi.SessionOptionsAppendExecutionProvider_DML1(options, dml_device, cmd_queue);
   API_IMPL_END
   return nullptr;
 }

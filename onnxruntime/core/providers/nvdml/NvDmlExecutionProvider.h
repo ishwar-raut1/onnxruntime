@@ -83,7 +83,6 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
     return d3d12_device_.Get();
   }
 
-  void NvDmlExecutionProvider::addOperatorToKernelRegistry();
 
 
   private:
