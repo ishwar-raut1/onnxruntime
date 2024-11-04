@@ -41,7 +41,7 @@ std::unique_ptr<IExecutionProvider> NvDmlProviderFactory::CreateProvider() {
   ComPtr<ID3D12Device> d3d12_device;
   ORT_THROW_IF_FAILED(cmd_queue_->GetDevice(IID_PPV_ARGS(&d3d12_device)));
 
-  auto context = wil::MakeOrThrow<Dml::ExecutionContext>(d3d12_device.Get(), dml_device_, cmd_queue_, true, true);
+  auto context = wil::MakeOrThrow<Dml::ExecutionContext>(d3d12_device.Get(), dml_device_, cmd_queue_, false, false);
 ORT_THROW_IF_FAILED(d3d12_device->SetPrivateDataInterface(dml_execution_context_guid, context.Get()));
   auto provider = std::make_unique<NvDml::NvDmlExecutionProvider>(d3d12_device.Get(), cmd_queue_, context.Get());
 
