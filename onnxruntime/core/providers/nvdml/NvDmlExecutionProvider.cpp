@@ -1,17 +1,9 @@
 #include "NvDmlExecutionProvider.h"
 #include "core/graph/constants.h"
-#include "NvDmlOp.h"
 namespace NvDml {
-const char* typeLabel = "T";
-NvDmlExecutionProvider::NvDmlExecutionProvider(ID3D12Device* dmlDevice, ID3D12CommandQueue* executionContext, Dml::ExecutionContext* context): IExecutionProvider(onnxruntime::kNvDmlExecutionProvider, OrtDevice(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, 0)) {
-  d3d12_device_ = dmlDevice;
-  cmd_queue_ = executionContext;
-  context_.reset(context);
-
-  m_kernelRegistry = std::make_shared<onnxruntime::KernelRegistry>();
-
-
-}
+NvDmlExecutionProvider::NvDmlExecutionProvider(ID3D12Device* d3d12Device, ID3D12CommandQueue* commandQueue, Dml::ExecutionContext* context)
+    : IExecutionProvider(onnxruntime::kNvDmlExecutionProvider, OrtDevice(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, 0))
+    , m_d3d12Device(d3d12Device), m_commandQueue(commandQueue), m_executionContext(context) {}
 
 std::vector<std::unique_ptr<onnxruntime::ComputeCapability>>
 NvDmlExecutionProvider::GetCapability(

@@ -44,9 +44,6 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
     return nullptr;
   }
 
-  std::shared_ptr<onnxruntime::KernelRegistry> GetKernelRegistry() const final override {
-    return m_kernelRegistry;
-  }
 
   std::vector<std::unique_ptr<onnxruntime::ComputeCapability>>
   GetCapability(const onnxruntime::GraphViewer& graph,
@@ -57,8 +54,8 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   }
 
   onnxruntime::Status Sync() const final override {
-    context_->Flush();
-    context_->GetCurrentCompletionEvent().WaitForSignal(false);
+    m_executionContext->Flush();
+    m_executionContext->GetCurrentCompletionEvent().WaitForSignal(false);
     return Status::OK();
   }
 
@@ -67,7 +64,7 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   }
 
   Status OnRunEnd(bool /*sync_stream*/, const onnxruntime::RunOptions& /*run_options*/) final {
-    context_->Flush();
+    m_executionContext->Flush();
     return Status::OK();
   }
 
@@ -76,24 +73,19 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   }
 
   Dml::ExecutionContext* GetExecutionContext() const {
-    return context_.get();
+    return m_executionContext.Get();
   }
 
   ID3D12Device* GetD3D12Device() const {
-    return d3d12_device_.Get();
+    return m_d3d12Device.Get();
   }
 
 
 
   private:
-  ComPtr<IDMLDevice> dml_device_;
-  ComPtr<ID3D12CommandQueue> cmd_queue_;
-  ComPtr<ID3D12Device> d3d12_device_;
-  std::unique_ptr<Dml::ExecutionContext> context_;
-  std::unique_ptr<Dml::BucketizedBufferAllocator> dml_allocator;
-  std::unique_ptr<Dml::ReadbackHeap> readback_heap;
-  std::unique_ptr<Dml::PooledUploadHeap> upload_heap;
-  std::shared_ptr<onnxruntime::KernelRegistry> m_kernelRegistry;
+  ComPtr<ID3D12Device> m_d3d12Device;
+  ComPtr<ID3D12CommandQueue> m_commandQueue;
+  ComPtr<Dml::ExecutionContext> m_executionContext;
 
 };
 
