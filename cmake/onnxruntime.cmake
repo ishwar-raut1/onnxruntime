@@ -1,4 +1,5 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) 2024 NVIDIA Corporation.
 # Licensed under the MIT License.
 
 if(UNIX)

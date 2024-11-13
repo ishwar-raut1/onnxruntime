@@ -1,3 +1,6 @@
+// Copyright (c) 2024 NVIDIA Corporation.
+// Licensed under the MIT License.
+
 #include "NvDmlExecutionProvider.h"
 #include "core/graph/constants.h"
 namespace NvDml {

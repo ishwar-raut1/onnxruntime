@@ -1,3 +1,5 @@
+# Copyright (c) 2024 NVIDIA Corporation.
+# Licensed under the MIT License.
 
 file(GLOB_RECURSE onnxruntime_providers_nvdml_cc_srcs CONFIGURE_DEPENDS
   "${ONNXRUNTIME_ROOT}/core/providers/nvdml/*.h"

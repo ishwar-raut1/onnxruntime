@@ -1,3 +1,6 @@
+// Copyright (c) 2024 NVIDIA Corporation.
+// Licensed under the MIT License.
+
 #include "onnxruntime_c_api.h"
 #include <d3d12.h>
 #include <DirectML.h>

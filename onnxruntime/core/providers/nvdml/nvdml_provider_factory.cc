@@ -1,3 +1,5 @@
+// Copyright (c) 2024 NVIDIA Corporation.
+// Licensed under the MIT License.
 
 #include <dxcore.h>
 #include <vector>
