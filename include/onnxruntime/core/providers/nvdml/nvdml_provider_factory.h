@@ -28,5 +28,4 @@ struct OrtNvDmlApi : OrtDmlApi {
                    _In_ IDMLDevice* dml_device, _In_ ID3D12CommandQueue* cmd_queue);
 
 
-    OrtNvDmlApi(const OrtDmlApi& base_api);
 };

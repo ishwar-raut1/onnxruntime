@@ -204,6 +204,7 @@ bool TransformerMemcpyImpl::ModifyGraph(const KernelRegistryManager& kernel_regi
 
 void TransformerMemcpyImpl::ProcessDefs(onnxruntime::Node& node, const KernelRegistryManager& kernel_registries,
                                         InitializedTensorSet& initializers_consumed) {
+                                          //revisit this
   auto node_provider_type = node.GetExecutionProviderType();
   if ((node_provider_type == provider_) ||
       (node_provider_type == kDmlExecutionProvider && kNvDmlExecutionProvider == provider_) ||

@@ -19,9 +19,6 @@ using Microsoft::WRL::ComPtr;
 #include "core/providers/dml/DmlExecutionProvider/src/DescriptorPool.h"
 #include "core/providers/dml/DmlExecutionProvider/src/DmlCommittedResourceAllocator.h"
 #include "core/providers/dml/DmlExecutionProvider/inc/DmlExecutionProvider.h"
-#include "core/providers/dml/DmlExecutionProvider/src/BucketizedBufferAllocator.h"
-#include "core/providers/dml/DmlExecutionProvider/src/PooledUploadHeap.h"
-#include "core/providers/dml/DmlExecutionProvider/src/ReadbackHeap.h"
 #include "core/providers/dml/DmlExecutionProvider/src/AllocationInfo.h"
 
 
@@ -41,6 +38,7 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
       Dml::ExecutionContext* context);
 
   std::unique_ptr<onnxruntime::IDataTransfer> GetDataTransfer() const final override {
+    // returning nullptr will use the DataTrasfer implemented in the DML EP
     return nullptr;
   }
 
@@ -69,6 +67,7 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
   }
 
   virtual std::vector<onnxruntime::AllocatorPtr> CreatePreferredAllocators() override {
+    // returning empty vector will use the preffered allocators implemented by DML EP.
     return std::vector<onnxruntime::AllocatorPtr>();
   }
 

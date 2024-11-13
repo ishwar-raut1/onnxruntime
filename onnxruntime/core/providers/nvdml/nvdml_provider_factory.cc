@@ -41,8 +41,9 @@ std::unique_ptr<IExecutionProvider> NvDmlProviderFactory::CreateProvider() {
   ComPtr<ID3D12Device> d3d12_device;
   ORT_THROW_IF_FAILED(cmd_queue_->GetDevice(IID_PPV_ARGS(&d3d12_device)));
 
+  // the execution context shared by DML and NVDML EP. It is created NVDML EP and passed to DML EP as private data in D3D12 Devices.
   auto context = wil::MakeOrThrow<Dml::ExecutionContext>(d3d12_device.Get(), dml_device_, cmd_queue_, false, false);
-ORT_THROW_IF_FAILED(d3d12_device->SetPrivateDataInterface(dml_execution_context_guid, context.Get()));
+  ORT_THROW_IF_FAILED(d3d12_device->SetPrivateDataInterface(dml_execution_context_guid, context.Get()));
   auto provider = std::make_unique<NvDml::NvDmlExecutionProvider>(d3d12_device.Get(), cmd_queue_, context.Get());
 
   return provider;
@@ -67,17 +68,13 @@ ORT_API_STATUS_IMPL(OrtSessionOptionsAppendExecutionProvider_NVDML, _In_ OrtSess
   return nullptr;
 }
 
-
-OrtNvDmlApi::OrtNvDmlApi(const OrtDmlApi& base_api) {
-    // Copy the contents of base_api into this object
-    std::memcpy(static_cast<OrtDmlApi*>(this), &base_api, sizeof(OrtDmlApi));
-
-    // Assign the NVDML-specific function pointer
-    SessionOptionsAppendExecutionProvider_NVDML = OrtSessionOptionsAppendExecutionProvider_NVDML;
-  }
-
-// Singleton pattern for OrtNvDmlApi instance
-const OrtNvDmlApi* GetOrtNvDmlApi(_In_ uint32_t /*version*/) NO_EXCEPTION {
-  static OrtNvDmlApi api_instance(*GetOrtDmlApi(/*version=*/0));  // Copy OrtDmlApi into OrtNvDmlApi
-  return &api_instance;
+const OrtNvDmlApi* GetOrtNvDmlApi(uint32_t version) {
+    static const OrtNvDmlApi api = [&] {
+        OrtNvDmlApi api_instance;
+        const OrtDmlApi* base_api = GetOrtDmlApi(version);
+        std::memcpy(static_cast<OrtDmlApi*>(&api_instance), base_api, sizeof(OrtDmlApi));
+        api_instance.SessionOptionsAppendExecutionProvider_NVDML = OrtSessionOptionsAppendExecutionProvider_NVDML;
+        return api_instance;
+    }();
+    return &api;
 }

@@ -1310,6 +1310,9 @@ def generate_build_tree(
         if args.use_dml and not (args.dml_path or args.dml_external_project):
             raise BuildError("You must set dml_path or dml_external_project when building with the GDK.")
 
+    if args.use_nvdml and not args.use_dml:
+        raise BuildError("DML must be enabled to use NVDML.")
+
     if is_macOS() and not args.android:
         cmake_args += ["-DCMAKE_OSX_ARCHITECTURES=" + args.osx_arch]
         if args.apple_deploy_target:
@@ -1843,7 +1846,7 @@ def setup_migraphx_vars(args):
 
 
 def setup_dml_build(args, cmake_path, build_dir, configs):
-    if not (args.use_dml or args.use_nvdml):
+    if not (args.use_dml):
         return
 
     if args.dml_path:

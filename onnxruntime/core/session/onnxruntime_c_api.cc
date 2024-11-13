@@ -2204,7 +2204,9 @@ ORT_API_STATUS_IMPL(OrtApis::GetExecutionProviderApi,
     }
     return NULL;
   }
+#endif // USE_DML
 
+#ifdef USE_NVDML
   if (strcmp(provider_name, "NVDML") == 0) {
     *provider_api = GetOrtNvDmlApi(version);
     if (*provider_api == nullptr) {
@@ -2212,7 +2214,7 @@ ORT_API_STATUS_IMPL(OrtApis::GetExecutionProviderApi,
     }
     return NULL;
   }
-#endif
+#endif // USE_NVDML
 
   return OrtApis::CreateStatus(ORT_INVALID_ARGUMENT, "Specified provider is not supported.");
   API_IMPL_END
