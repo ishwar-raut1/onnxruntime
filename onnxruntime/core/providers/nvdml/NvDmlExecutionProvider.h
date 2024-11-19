@@ -32,7 +32,7 @@ std::unique_ptr<onnxruntime::IExecutionProvider> CreateExecutionProvider(
 
 class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
  public:
-  virtual ~NvDmlExecutionProvider() {}
+  virtual ~NvDmlExecutionProvider();
   NvDmlExecutionProvider() = delete;
 
   explicit NvDmlExecutionProvider(
@@ -82,12 +82,15 @@ class NvDmlExecutionProvider : public onnxruntime::IExecutionProvider {
     return m_d3d12Device.Get();
   }
 
-
+  std::shared_ptr<onnxruntime::KernelRegistry> GetKernelRegistry() const final override {
+    return m_kernelRegistry;
+  }
 
   private:
   ComPtr<ID3D12Device> m_d3d12Device;
   ComPtr<ID3D12CommandQueue> m_commandQueue;
   ComPtr<Dml::ExecutionContext> m_executionContext;
+  std::shared_ptr<onnxruntime::KernelRegistry> m_kernelRegistry;
 
 };
 

@@ -350,6 +350,17 @@ std::unique_ptr<IExecutionProvider> DefaultDmlExecutionProvider() {
   if (auto factory = DMLProviderFactoryCreator::CreateFromDeviceOptions(config_options, nullptr, false, false)) {
     return factory->CreateProvider();
   }
+
+#endif
+  return nullptr;
+}
+
+std::unique_ptr<IExecutionProvider> DefaultNvDmlExecutionProvider() {
+#ifdef USE_NVDML
+  ConfigOptions config_options{};
+  if (auto factory = NVDMLProviderFactoryCreator::Create(config_options)) {
+    return factory->CreateProvider();
+  }
 #endif
   return nullptr;
 }

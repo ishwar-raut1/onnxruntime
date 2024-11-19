@@ -32,6 +32,7 @@
 
 #if defined(USE_DML)
 #include "core/providers/dml/dml_provider_factory_creator.h"
+#include "core/providers/nvdml/NvDmlFactoryCreator.h"
 #endif
 
 #if defined(USE_DNNL)

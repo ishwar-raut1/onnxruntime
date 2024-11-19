@@ -788,7 +788,9 @@ if (onnxruntime_USE_ROCM)
 endif()
 onnxruntime_add_include_to_target(onnxruntime_test_utils onnxruntime_common onnxruntime_framework onnxruntime_session GTest::gtest GTest::gmock onnx onnx_proto flatbuffers::flatbuffers nlohmann_json::nlohmann_json Boost::mp11 safeint_interface)
 
-
+if (onnxruntime_USE_NVDML)
+  target_include_directories(onnxruntime_test_utils PRIVATE ${ONNXRUNTIME_INCLUDE_DIR}/core/providers/dml)
+endif()
 
 if (onnxruntime_USE_DML)
   target_add_dml(onnxruntime_test_utils)
@@ -994,6 +996,10 @@ if (onnxruntime_USE_ROCM)
   target_compile_options(onnxruntime_test_all PRIVATE -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1)
   target_include_directories(onnxruntime_test_all PRIVATE  ${onnxruntime_ROCM_HOME}/hipfft/include ${onnxruntime_ROCM_HOME}/include ${onnxruntime_ROCM_HOME}/hiprand/include ${onnxruntime_ROCM_HOME}/rocrand/include ${CMAKE_CURRENT_BINARY_DIR}/amdgpu/onnxruntime ${CMAKE_CURRENT_BINARY_DIR}/amdgpu/orttraining)
 endif()
+if (onnxruntime_USE_NVDML)
+  target_include_directories(onnxruntime_test_all PRIVATE ${ONNXRUNTIME_INCLUDE_DIR}/core/providers/dml)
+endif()
+
 if (onnxruntime_ENABLE_TRAINING_TORCH_INTEROP)
   target_link_libraries(onnxruntime_test_all PRIVATE Python::Python)
 endif()
