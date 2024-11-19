@@ -12,7 +12,7 @@ NvDmlExecutionProvider::NvDmlExecutionProvider(ID3D12Device* d3d12Device, ID3D12
 
 NvDmlExecutionProvider::~NvDmlExecutionProvider() {
   ComPtr<ID3D12Device> d3d12_device;
-  ORT_THROW_IF_FAILED(cmd_queue_->GetDevice(IID_PPV_ARGS(&d3d12_device)));
+  ORT_THROW_IF_FAILED(m_commandQueue->GetDevice(IID_PPV_ARGS(&d3d12_device)));
   ORT_THROW_IF_FAILED(d3d12_device->SetPrivateDataInterface(dml_execution_context_guid, nullptr));
 }
 
