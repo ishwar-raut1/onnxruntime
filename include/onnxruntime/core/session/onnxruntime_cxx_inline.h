@@ -13,6 +13,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include "onnxruntime_cxx_api.h"
 
 // Convert OrtStatus to Ort::Status and return
 // instead of throwing
@@ -1424,6 +1425,8 @@ std::vector<ValueInfo> ConstSessionImpl<T>::GetOutputs() const {
   return outputs;
 }
 
+
+
 template <typename T>
 inline std::vector<Value> SessionImpl<T>::Run(const RunOptions& run_options, const char* const* input_names, const Value* input_values, size_t input_count,
                                               const char* const* output_names, size_t output_count) {
@@ -1479,6 +1482,17 @@ inline void SessionImpl<T>::FinalizeModelEditorSession(const Model& model, const
   ThrowOnError(GetModelEditorApi().FinalizeModelEditorSession(this->p_, options, prepacked_weights_container));
 }
 #endif  // #if !defined(ORT_MINIMAL_BUILD)
+template <typename T>
+inline void SessionImpl<T>::suspend() {
+  ThrowOnError(GetApi().SessionSuspend(this->p_));
+}
+
+template <typename T>
+inline void SessionImpl<T>::resume() {
+  ThrowOnError(GetApi().SessionResume(this->p_));
+}
+
+
 
 }  // namespace detail
 

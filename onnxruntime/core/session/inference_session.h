@@ -374,6 +374,10 @@ class InferenceSession {
                                         RunAsyncCallbackFn callback,
                                         void* user_data = nullptr);
 
+  void suspend();
+
+  void resume();
+
   /**
    * Run a pre-loaded and pre-intialized model.
    * Multiple threads are allowed to run this function; hence its thread-safe.

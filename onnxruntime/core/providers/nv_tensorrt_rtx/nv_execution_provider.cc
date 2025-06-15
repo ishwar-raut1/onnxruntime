@@ -2211,6 +2211,61 @@ common::Status NvExecutionProvider::RefitEngine(std::string onnx_model_filename,
   }
   return Status::OK();
 }
+void NvExecutionProvider::Suspend()  {
+  // Synchronize CUDA stream to ensure all pending operations are completed
+  // engines_.emplace(fused_node.Name(), std::move(trt_engine));
+  // deserialize the engine and save it to serialized_engines_
+  for (auto& [name, engine] : engines_) {
+    auto serialized_engine = engine->serialize();
+    serialized_engines_.emplace(name, std::move(serialized_engine));
+  }
+
+  contexts_.clear();
+  // release the engines_
+  engines_.clear();
+
+}
+
+
+void NvExecutionProvider::Resume(){
+  // deserialize the engine and save it to engines_
+  for (auto& [name, serialized_engine] : serialized_engines_) {
+    auto engine = std::unique_ptr<nvinfer1::ICudaEngine>(runtime_->deserializeCudaEngine(serialized_engine->data(), serialized_engine->size()));
+
+    std::unique_ptr<nvinfer1::IExecutionContext> trt_context;
+
+    // Build context
+    //
+    // Note: Creating an execution context from an engine is thread safe per TRT doc
+    // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#threading
+    if (context_memory_sharing_enable_) {
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+      size_t mem_size = engine->getDeviceMemorySizeV2();
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+      if (mem_size > max_ctx_mem_size_) {
+        max_ctx_mem_size_ = mem_size;
+      }
+      trt_context = std::unique_ptr<nvinfer1::IExecutionContext>(engine->createExecutionContext(nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED));
+
+    } else {
+      trt_context = std::unique_ptr<nvinfer1::IExecutionContext>(engine->createExecutionContext());
+    }
+
+
+
+    engines_.emplace(name, std::move(engine));
+
+    contexts_.emplace(name, std::move(trt_context));
+  }
+
+  // release the serialized_engines_
+  serialized_engines_.clear();
+}
 
 common::Status NvExecutionProvider::Compile(const std::vector<FusedNodeAndGraph>& fused_nodes_and_graphs,
                                             std::vector<NodeComputeInfo>& node_compute_funcs) {
@@ -2530,6 +2585,9 @@ Status NvExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphViewer& gr
       return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                              "Nv EP failed to deserialize engine for fused node: " + fused_node.Name());
     }
+
+
+
     if (detailed_build_log_) {
       auto engine_build_stop = std::chrono::steady_clock::now();
       LOGS_DEFAULT(INFO) << "TensorRT engine build for " << trt_node_name_with_precision << " took: " << std::chrono::duration_cast<std::chrono::milliseconds>(engine_build_stop - engine_build_start).count() << "ms" << std::endl;
@@ -2643,7 +2701,7 @@ Status NvExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphViewer& gr
           context_memory_sharing_enable_, &max_ctx_mem_size_,
           engine_decryption_enable_, engine_decryption_, engine_encryption_,
           detailed_build_log_, sparsity_enable_,
-          auxiliary_streams_, cuda_graph_enable_, cache_prefix_, cache_suffix};
+          auxiliary_streams_, cuda_graph_enable_, cache_prefix_, cache_suffix, this};
     *state = p.release();
     return 0;
   };
@@ -2674,8 +2732,8 @@ Status NvExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphViewer& gr
     std::unordered_map<std::string, std::vector<int32_t>> shape_tensor_values;        // This map holds "shape tensor -> shape values" for the shape tensor input across this inference run
     std::unordered_map<std::string, std::vector<int64_t>> shape_tensor_values_int64;  // same as above but for int64 shape tensor input
     auto& dds_output_allocator_map = this->dds_output_allocator_maps_[fused_node_name];
-    auto trt_engine = trt_state->engine->get();
-    auto trt_context = trt_state->context->get();
+    auto trt_engine = trt_state->ep->engines_[fused_node_name].get();
+    auto trt_context = trt_state->ep->contexts_[fused_node_name].get();
     auto trt_profiles = trt_state->profiles;
     auto max_context_mem_size_ptr = trt_state->max_context_mem_size_ptr;
     int num_inputs = static_cast<int>(input_indexes.size());

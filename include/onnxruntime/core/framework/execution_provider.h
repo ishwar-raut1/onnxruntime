@@ -366,6 +366,21 @@ class IExecutionProvider {
     return InlinedVector<const Node*>();
   }
 
+  /**
+   * Suspend the session to release resources.
+   */
+  virtual void Suspend() {
+    // default to no-op
+  }
+
+  /**
+   * Called to resume a suspended provider.
+   */
+  virtual void Resume() {
+    // default to no-op
+  }
+
+
  private:
   const std::string type_;
 

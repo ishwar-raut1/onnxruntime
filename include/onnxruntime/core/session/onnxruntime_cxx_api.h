@@ -1380,6 +1380,8 @@ struct SessionImpl : ConstSessionImpl<T> {
 
   void FinalizeModelEditorSession(const Model& model, const SessionOptions& options,
                                   OrtPrepackedWeightsContainer* prepacked_weights_container = nullptr);
+  void suspend();
+  void resume();
 };
 
 }  // namespace detail

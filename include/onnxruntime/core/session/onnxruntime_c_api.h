@@ -4926,6 +4926,7 @@ struct OrtApi {
   ORT_API2_STATUS(SetEpDynamicOptions, _Inout_ OrtSession* sess, _In_reads_(kv_len) const char* const* keys,
                   _In_reads_(kv_len) const char* const* values, _In_ size_t kv_len);
 
+
   /** \brief Release an OrtValueInfo instance if it was not added to an OrtGraph.
    * \since Version 1.22.
    */
@@ -5328,15 +5329,28 @@ struct OrtApi {
    * \since Version 1.23.
    */
   ORT_API2_STATUS(AllocatorGetStats, _In_ const OrtAllocator* ort_allocator, _Outptr_ OrtKeyValuePairs** out);
+
+    /** \brief Suspend a session to release resources.
+   *
+   * This function suspends a session to release resources. The session can be resumed later.
+   * This is useful when you want to temporarily release resources but keep the session alive.
+   *
+   * \param[in] sess The session to suspend
+   *
+   * \snippet{doc} snippets.dox OrtStatus Return Value
+   *
+   * \since Version 1.20.
+   */
+  ORT_API2_STATUS(SessionSuspend, _Inout_ OrtSession* sess);
+
+  /** \brief Resume a session.
+   *
+   * This function resumes a session that was suspended.
+   * \param[in] sess The session to resume
+   * \return A status object indicating success or failure.
+   */
+  ORT_API2_STATUS(SessionResume, _Inout_ OrtSession* sess);
 };
-
-/*
- * Steps to use a custom op:
- *   1 Create an OrtCustomOpDomain with the domain name used by the custom ops
- *   2 Create an OrtCustomOp structure for each op and add them to the domain
- *   3 Call OrtAddCustomOpDomain to add the custom domain of ops to the session options
- */
-
 // Specifies some characteristics of inputs/outputs of custom ops:
 // Specify if the inputs/outputs are one of:
 // 1) Non-optional (input/output must be present in the node)

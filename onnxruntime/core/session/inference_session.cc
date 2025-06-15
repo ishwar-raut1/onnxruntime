@@ -2888,6 +2888,20 @@ Status InferenceSession::Run(const RunOptions& run_options,
   return retval;
 }
 
+void InferenceSession::suspend() {
+  //LOGS(*session_logger_, INFO) << "Suspend session";
+  for (auto& xp : execution_providers_) {
+    xp->Suspend();
+  }
+}
+
+void InferenceSession::resume() {
+  //LOGS(*session_logger_, INFO) << "Resume session";
+  for (auto& xp : execution_providers_) {
+    xp->Resume();
+  }
+}
+
 Status InferenceSession::Run(const RunOptions& run_options,
                              gsl::span<const char* const> feed_names,
                              gsl::span<const OrtValue* const> feeds,

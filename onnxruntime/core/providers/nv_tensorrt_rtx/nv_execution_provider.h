@@ -110,38 +110,7 @@ class OutputAllocator : public nvinfer1::IOutputAllocator {
  */
 using ShapeRangesMap = std::unordered_map<std::string, std::unordered_map<size_t, std::vector<std::vector<int64_t>>>>;
 
-// Information to construct kernel function state.
-struct TensorrtFuncState {
-  AllocateFunc test_allocate_func = nullptr;
-  DestroyFunc test_release_func = nullptr;
-  AllocatorHandle allocator = nullptr;
-  std::string fused_node_name;
-  nvinfer1::IBuilder* builder;
-  tensorrt_ptr::unique_pointer<nvonnxparser::IParser>* parser = nullptr;
-  std::unique_ptr<nvinfer1::ICudaEngine>* engine = nullptr;
-  std::unique_ptr<nvinfer1::IExecutionContext>* context = nullptr;
-  std::unique_ptr<nvinfer1::INetworkDefinition>* network = nullptr;
-  std::vector<std::unordered_map<std::string, size_t>> input_info;
-  std::vector<std::unordered_map<std::string, size_t>> output_info;
-  std::unordered_map<std::string, std::unordered_map<size_t, std::vector<std::vector<int64_t>>>> input_shape_ranges;
-  std::mutex* tensorrt_mu_ptr = nullptr;
-  std::string trt_node_name_with_precision;
-  bool engine_cache_enable = false;
-  std::string engine_cache_path;
-  nvinfer1::IRuntime* runtime = nullptr;
-  std::vector<nvinfer1::IOptimizationProfile*> profiles;
-  bool context_memory_sharing_enable = false;
-  size_t* max_context_mem_size_ptr = nullptr;
-  bool engine_decryption_enable = false;
-  int (*engine_decryption)(const char*, char*, size_t*) = nullptr;
-  int (*engine_encryption)(const char*, char*, size_t) = nullptr;
-  bool detailed_build_log = false;
-  bool sparsity_enable = false;
-  int auxiliary_streams = -1;
-  bool cuda_graph_enable = 0;
-  std::string cache_prefix;
-  std::string cache_suffix;
-};
+
 
 // Minimum information to construct kernel function state for direct engine load code path
 struct TensorrtShortFuncState {
@@ -217,6 +186,8 @@ class NvExecutionProvider : public IExecutionProvider {
   bool IsGraphCaptureEnabled() const override;
   bool IsGraphCaptured(int graph_annotation_id) const override;
   Status ReplayGraph(int graph_annotation_id) override;
+  void Suspend() override;
+  void Resume() override;
 
   static common::Status RefitEngine(std::string onnx_model_filename,
                                     std::string& onnx_model_folder_path,
@@ -292,6 +263,8 @@ class NvExecutionProvider : public IExecutionProvider {
   // For those non thread safe operations, TRT EP uses (1) lock_guard or (2) PerThreadContext to make sure synchronization.
   std::unordered_map<std::string, tensorrt_ptr::unique_pointer<nvonnxparser::IParser>> parsers_;
   std::unordered_map<std::string, std::unique_ptr<nvinfer1::ICudaEngine>> engines_;
+  std::unordered_map<std::string, std::unique_ptr<nvinfer1::IHostMemory>> serialized_engines_;
+
   std::unordered_map<std::string, std::unique_ptr<nvinfer1::IExecutionContext>> contexts_;
   std::unordered_map<std::string, std::unique_ptr<nvinfer1::IBuilder>> builders_;
   std::unordered_map<std::string, std::unique_ptr<nvinfer1::INetworkDefinition>> networks_;
@@ -523,5 +496,39 @@ class NvExecutionProvider : public IExecutionProvider {
    * This function only creates the instance at the first time it's being called."
    */
   nvinfer1::IBuilder* GetBuilder(TensorrtLogger& trt_logger) const;
+};
+
+// Information to construct kernel function state.
+struct TensorrtFuncState {
+  AllocateFunc test_allocate_func = nullptr;
+  DestroyFunc test_release_func = nullptr;
+  AllocatorHandle allocator = nullptr;
+  std::string fused_node_name;
+  nvinfer1::IBuilder* builder;
+  tensorrt_ptr::unique_pointer<nvonnxparser::IParser>* parser = nullptr;
+ std::unique_ptr<nvinfer1::ICudaEngine>* engine = nullptr;
+  std::unique_ptr<nvinfer1::IExecutionContext>* context = nullptr;
+  std::unique_ptr<nvinfer1::INetworkDefinition>* network = nullptr;
+  std::vector<std::unordered_map<std::string, size_t>> input_info;
+  std::vector<std::unordered_map<std::string, size_t>> output_info;
+  std::unordered_map<std::string, std::unordered_map<size_t, std::vector<std::vector<int64_t>>>> input_shape_ranges;
+  std::mutex* tensorrt_mu_ptr = nullptr;
+  std::string trt_node_name_with_precision;
+  bool engine_cache_enable = false;
+  std::string engine_cache_path;
+  nvinfer1::IRuntime* runtime = nullptr;
+  std::vector<nvinfer1::IOptimizationProfile*> profiles;
+  bool context_memory_sharing_enable = false;
+  size_t* max_context_mem_size_ptr = nullptr;
+  bool engine_decryption_enable = false;
+  int (*engine_decryption)(const char*, char*, size_t*) = nullptr;
+  int (*engine_encryption)(const char*, char*, size_t) = nullptr;
+  bool detailed_build_log = false;
+  bool sparsity_enable = false;
+  int auxiliary_streams = -1;
+  bool cuda_graph_enable = 0;
+  std::string cache_prefix;
+  std::string cache_suffix;
+  NvExecutionProvider* ep = nullptr;
 };
 }  // namespace onnxruntime
