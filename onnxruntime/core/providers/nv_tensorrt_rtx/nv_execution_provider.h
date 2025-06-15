@@ -18,6 +18,31 @@ typedef void* cudnnStatus_t;
 #include "nv_execution_provider_info.h"
 
 namespace onnxruntime {
+class CustomCudaAllocator : public nvinfer1::IGpuAllocator {
+public:
+    CustomCudaAllocator();
+    ~CustomCudaAllocator() override;
+
+    void* allocate(uint64_t size, uint64_t alignment, nvinfer1::AllocatorFlags flags) noexcept override;
+
+    bool deallocate(void* ptr) noexcept override;
+
+    bool transferToPinnedMemory(void* ptr) noexcept;
+
+    bool reallocateAndTransfer(void* ptr) noexcept;
+
+    bool releasePinnedMemory(void* ptr) noexcept;
+
+private:
+    std::mutex mtx_;
+    std::unordered_map<void*, std::tuple<CUmemGenericAllocationHandle, size_t>> ptr_map_;
+    std::unordered_map<void*, void*> pinned_memory_map_;  // Maps VA to pinned memory
+    CUdevice device;
+    CUcontext context;
+    std::vector<CUmemGenericAllocationHandle> allocationHandles;
+    std::vector<void*> virtualAddresses;
+    std::vector<size_t> allocationSizes;
+};
 
 class TensorrtLogger : public nvinfer1::ILogger {
   nvinfer1::ILogger::Severity verbosity_;
@@ -218,6 +243,7 @@ class NvExecutionProvider : public IExecutionProvider {
   bool sparsity_enable_ = false;
   int auxiliary_streams_ = -1;
   std::string cache_path_, engine_decryption_lib_path_;
+    CustomCudaAllocator custom_cuda_allocator_;
   std::unique_ptr<nvinfer1::IRuntime> runtime_ = nullptr;
   std::mutex tensorrt_mu_;
   int device_id_;
@@ -276,6 +302,7 @@ class NvExecutionProvider : public IExecutionProvider {
   std::unordered_map<std::string, ShapeRangesMap> input_shape_ranges_;  // The profile shape ranges that the engine is built with
   std::unordered_map<std::string, std::vector<nvinfer1::IOptimizationProfile*>> profiles_;
   std::unordered_map<std::string, DDSOutputAllocatorMap> dds_output_allocator_maps_;
+
 
   // for external stream, we need to create its cudnn/cublass handle before cuda EP enable cuda graph capture
   cudnnHandle_t external_cudnn_handle_ = nullptr;

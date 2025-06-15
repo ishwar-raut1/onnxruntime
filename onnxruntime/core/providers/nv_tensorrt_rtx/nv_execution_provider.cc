@@ -82,6 +82,227 @@ struct ShutdownProtobuf {
 } g_protobuf;
 
 namespace onnxruntime {
+#ifndef CUDA_CHECK
+#define CUDA_CHECK(call)                                       \
+  do {                                                         \
+    CUresult error = call;                                     \
+    if (error != CUDA_SUCCESS) {                               \
+      const char* errorString;                                 \
+      cuGetErrorString(error, &errorString);                   \
+      throw std::runtime_error(std::string("CUDA error at ") + \
+                               __FILE__ + ":" +                \
+                               std::to_string(__LINE__) + ": " + errorString); \
+    }                                                          \
+  } while (0)
+#endif
+  CustomCudaAllocator::CustomCudaAllocator() {
+        // Initialize CUDA driver API
+        CUDA_CHECK(cuInit(0));
+
+        // Get the first available device
+        CUDA_CHECK(cuDeviceGet(&device, 0));
+
+        // Create a CUDA context
+        CUDA_CHECK(cuCtxCreate(&context, 0, device));
+    }
+    CustomCudaAllocator::~CustomCudaAllocator()  {
+        std::lock_guard<std::mutex> lock(mtx_);
+        for (auto const& [ptr, val] : ptr_map_) {
+            auto const& [handle, size] = val;
+            cuMemUnmap(reinterpret_cast<CUdeviceptr>(ptr), size);
+            cuMemAddressFree(reinterpret_cast<CUdeviceptr>(ptr), size);
+            cuMemRelease(handle);
+        }
+        ptr_map_.clear();
+    }
+
+    void* CustomCudaAllocator::allocate(uint64_t size, uint64_t alignment, nvinfer1::AllocatorFlags /*flags*/) noexcept  {
+        try {
+            size_t granularity = 0;
+            CUmemAllocationProp prop = {};
+            prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+            prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+
+            CUdevice device;
+            CUDA_CHECK(cuCtxGetDevice(&device));
+            prop.location.id = device;
+
+            CUDA_CHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+
+            if (alignment == 0) {
+                alignment = 1;
+            }
+            if (alignment > granularity) {
+                granularity = alignment;
+            }
+
+            size_t paddedSize = ((size + granularity - 1) / granularity) * granularity;
+            if (paddedSize == 0) {
+                // TensorRT requires non-null pointers even for empty tensors.
+                paddedSize = granularity;
+            }
+
+            CUmemGenericAllocationHandle allocHandle;
+            CUDA_CHECK(cuMemCreate(&allocHandle, paddedSize, &prop, 0));
+
+            CUdeviceptr virtualAddress = 0;
+            CUDA_CHECK(cuMemAddressReserve(&virtualAddress, paddedSize, 0, 0, 0));
+
+            CUDA_CHECK(cuMemMap(virtualAddress, paddedSize, 0, allocHandle, 0));
+
+            CUmemAccessDesc accessDesc = {};
+            accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            accessDesc.location.id = device;
+            accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+
+            CUDA_CHECK(cuMemSetAccess(virtualAddress, paddedSize, &accessDesc, 1));
+
+            void* ptr = reinterpret_cast<void*>(virtualAddress);
+
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                ptr_map_[ptr] = std::make_tuple(allocHandle, paddedSize);
+            }
+
+            return ptr;
+        } catch (const std::exception& e) {
+            // IAllocator::allocate is noexcept. Log the error.
+            std::cerr << "Exception in CustomCudaAllocator::allocate: " << e.what() << std::endl;
+            return nullptr;
+        }
+    }
+
+    bool CustomCudaAllocator::deallocate(void* ptr) noexcept  {
+        if (!ptr) {
+            return false;
+        }
+        try {
+            std::lock_guard<std::mutex> lock(mtx_);
+            auto it = ptr_map_.find(ptr);
+            if (it != ptr_map_.end()) {
+                auto const& [handle, size] = it->second;
+                CUDA_CHECK(cuMemUnmap(reinterpret_cast<CUdeviceptr>(ptr), size));
+                CUDA_CHECK(cuMemAddressFree(reinterpret_cast<CUdeviceptr>(ptr), size));
+                CUDA_CHECK(cuMemRelease(handle));
+                ptr_map_.erase(it);
+            } else {
+                std::cerr << "Attempted to free memory that wasn't allocated by this manager or was already freed." << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Exception in CustomCudaAllocator::free: " << e.what() << std::endl;
+            return false;
+        }
+        return true;
+    }
+
+    bool CustomCudaAllocator::transferToPinnedMemory(void* ptr) noexcept {
+        if (!ptr) {
+            return false;
+        }
+        try {
+            std::lock_guard<std::mutex> lock(mtx_);
+            auto it = ptr_map_.find(ptr);
+            if (it != ptr_map_.end()) {
+                auto const& [handle, size] = it->second;
+
+                // Allocate pinned memory
+                void* pinned_memory = nullptr;
+                cudaMallocHost(&pinned_memory, size);
+
+                // Copy data from device to pinned memory
+                (cudaMemcpy(pinned_memory, ptr, size, cudaMemcpyDeviceToHost));
+
+                // Unmap the virtual address but don't free it
+                CUDA_CHECK(cuMemUnmap(reinterpret_cast<CUdeviceptr>(ptr), size));
+
+                // Release the physical memory allocation handle
+                CUDA_CHECK(cuMemRelease(handle));
+
+                // Update the map to store pinned memory instead
+                ptr_map_.erase(it);
+                ptr_map_[ptr] = std::make_tuple(CUmemGenericAllocationHandle{}, size);
+
+                // Store pinned memory pointer
+                pinned_memory_map_[ptr] = pinned_memory;
+
+                return true;
+            }
+            return false;
+        } catch (const std::exception& e) {
+            std::cerr << "Exception in transferToPinnedMemory: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    bool CustomCudaAllocator::reallocateAndTransfer(void* ptr) noexcept {
+        if (!ptr) {
+            return false;
+        }
+        try {
+            std::lock_guard<std::mutex> lock(mtx_);
+            auto it = pinned_memory_map_.find(ptr);
+            if (it != pinned_memory_map_.end()) {
+                void* pinned_memory = it->second;
+                auto size_it = ptr_map_.find(ptr);
+                if (size_it == ptr_map_.end()) {
+                    return false;
+                }
+                size_t size = std::get<1>(size_it->second);
+
+                // Allocate physical memory
+                CUmemGenericAllocationHandle handle;
+                CUDA_CHECK(cuMemCreate(&handle, size, nullptr, 0));
+
+                // Map the physical memory to virtual address
+                CUdeviceptr va = 0;
+                CUDA_CHECK(cuMemMap(va, size, 0, handle, 0));
+
+                // Set access flags for the mapping
+                CUmemAccessDesc access_desc = {};
+                access_desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+                access_desc.location.id = 0;
+                access_desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                CUDA_CHECK(cuMemSetAccess(va, size, &access_desc, 1));
+
+                // Copy data from pinned memory to physical memory
+                (cudaMemcpy(reinterpret_cast<void*>(va), pinned_memory, size, cudaMemcpyHostToDevice));
+
+                // Free pinned memory
+                cudaFreeHost(pinned_memory);
+
+                // Update maps
+                pinned_memory_map_.erase(it);
+                ptr_map_[ptr] = std::make_tuple(handle, size);
+
+                return true;
+            }
+            return false;
+        } catch (const std::exception& e) {
+            std::cerr << "Exception in reallocateAndTransfer: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    bool CustomCudaAllocator::releasePinnedMemory(void* ptr) noexcept {
+        if (!ptr) {
+            return false;
+        }
+        try {
+            std::lock_guard<std::mutex> lock(mtx_);
+            auto it = pinned_memory_map_.find(ptr);
+            if (it != pinned_memory_map_.end()) {
+                cudaFreeHost(it->second);
+                pinned_memory_map_.erase(it);
+                ptr_map_.erase(ptr);
+                return true;
+            }
+            return false;
+        } catch (const std::exception& e) {
+            std::cerr << "Exception in releasePinnedMemory: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
 
 namespace cuda {
 template <>
@@ -1208,6 +1429,7 @@ NvExecutionProvider::NvExecutionProvider(const NvExecutionProviderInfo& info)
     runtime_ = std::unique_ptr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(GetTensorrtLogger(detailed_build_log_)));
   }
 
+  runtime_->setGpuAllocator(&custom_cuda_allocator_);
   trt_version_ = getInferLibVersion();
   CUDA_CALL_THROW(cudaRuntimeGetVersion(&cuda_version_));
 
