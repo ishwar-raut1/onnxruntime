@@ -1,0 +1,72 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
+#include "core/framework/cpu_offloading_allocator.h"
+#include "core/framework/stream.h"
+#include "core/framework/device_stream_utils.h"
+
+#include <cuda_runtime.h>
+
+namespace onnxruntime {
+
+// Helper function to check for CUDA errors
+static void CheckCudaError(cudaError_t error) {
+  if (error != cudaSuccess) {
+    throw std::runtime_error("CUDA error: " + std::string(cudaGetErrorString(error)));
+  }
+}
+
+CpuOffloadingAllocator::CpuOffloadingAllocator(std::unique_ptr<IAllocator> main_allocator,
+                                               std::unique_ptr<IAllocator> offload_allocator)
+    : IHeterogeneousAllocator(OrtMemoryInfo(main_allocator->Info().name, main_allocator->Info().alloc_type)),
+      main_allocator_(std::move(main_allocator)),
+      offload_allocator_(std::move(offload_allocator)) {
+  ORT_ENFORCE(main_allocator_ != nullptr, "Main allocator cannot be null.");
+  ORT_ENFORCE(offload_allocator_ != nullptr, "Offload allocator cannot be null.");
+}
+
+CpuOffloadingAllocator::~CpuOffloadingAllocator() = default;
+
+void* CpuOffloadingAllocator::Alloc(size_t size) {
+  return main_allocator_->Alloc(size);
+}
+
+void CpuOffloadingAllocator::Free(void* p) {
+  main_allocator_->Free(p);
+}
+
+const OrtMemoryInfo& CpuOffloadingAllocator::GetMainInfo() const {
+  return main_allocator_->Info();
+}
+
+const OrtMemoryInfo& CpuOffloadingAllocator::GetOffloadInfo() const {
+  return offload_allocator_->Info();
+}
+
+void* CpuOffloadingAllocator::AllocOnOffload(size_t size) {
+  return offload_allocator_->Alloc(size);
+}
+
+void CpuOffloadingAllocator::FreeOnOffload(void* p) {
+  offload_allocator_->Free(p);
+}
+
+void CpuOffloadingAllocator::CopyToMain(void* main_ptr, const void* offload_ptr, size_t size, Stream* stream) {
+  cudaStream_t cuda_stream = stream ? static_cast<cudaStream_t>(stream->GetHandle()) : nullptr;
+  CheckCudaError(cudaMemcpyAsync(main_ptr, offload_ptr, size, cudaMemcpyHostToDevice, cuda_stream));
+  // If no stream is provided, we must synchronize to ensure the copy completes.
+  if (!stream) {
+    CheckCudaError(cudaStreamSynchronize(nullptr));
+  }
+}
+
+void CpuOffloadingAllocator::CopyFromMain(void* offload_ptr, const void* main_ptr, size_t size, Stream* stream) {
+  cudaStream_t cuda_stream = stream ? static_cast<cudaStream_t>(stream->GetHandle()) : nullptr;
+  CheckCudaError(cudaMemcpyAsync(offload_ptr, main_ptr, size, cudaMemcpyDeviceToHost, cuda_stream));
+  // If no stream is provided, we must synchronize to ensure the copy completes.
+  if (!stream) {
+    CheckCudaError(cudaStreamSynchronize(nullptr));
+  }
+}
+
+}  // namespace onnxruntime

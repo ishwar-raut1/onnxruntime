@@ -27,9 +27,9 @@ public:
 
     bool deallocate(void* ptr) noexcept override;
 
-    bool transferToPinnedMemory(void* ptr) noexcept;
+    bool transferToPinnedMemory() noexcept;
 
-    bool reallocateAndTransfer(void* ptr) noexcept;
+    bool reallocateAndTransfer() noexcept;
 
     bool releasePinnedMemory(void* ptr) noexcept;
 

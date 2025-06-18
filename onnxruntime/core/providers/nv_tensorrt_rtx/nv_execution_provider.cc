@@ -118,6 +118,7 @@ namespace onnxruntime {
 
     void* CustomCudaAllocator::allocate(uint64_t size, uint64_t alignment, nvinfer1::AllocatorFlags /*flags*/) noexcept  {
         try {
+          std::cout << "allocating " << size << " bytes" << std::endl;
             size_t granularity = 0;
             CUmemAllocationProp prop = {};
             prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -195,88 +196,128 @@ namespace onnxruntime {
         return true;
     }
 
-    bool CustomCudaAllocator::transferToPinnedMemory(void* ptr) noexcept {
-        if (!ptr) {
-            return false;
-        }
+    bool CustomCudaAllocator::transferToPinnedMemory() noexcept  {
         try {
             std::lock_guard<std::mutex> lock(mtx_);
-            auto it = ptr_map_.find(ptr);
-            if (it != ptr_map_.end()) {
-                auto const& [handle, size] = it->second;
-
-                // Allocate pinned memory
-                void* pinned_memory = nullptr;
-                cudaMallocHost(&pinned_memory, size);
-
-                // Copy data from device to pinned memory
-                (cudaMemcpy(pinned_memory, ptr, size, cudaMemcpyDeviceToHost));
-
-                // Unmap the virtual address but don't free it
-                CUDA_CHECK(cuMemUnmap(reinterpret_cast<CUdeviceptr>(ptr), size));
-
-                // Release the physical memory allocation handle
-                CUDA_CHECK(cuMemRelease(handle));
-
-                // Update the map to store pinned memory instead
-                ptr_map_.erase(it);
-                ptr_map_[ptr] = std::make_tuple(CUmemGenericAllocationHandle{}, size);
-
-                // Store pinned memory pointer
-                pinned_memory_map_[ptr] = pinned_memory;
-
-                return true;
+            std::vector<void*> ptrs_to_transfer;
+            for (const auto& pair : ptr_map_) {
+                // If handle is not null, it's on device and needs to be transferred.
+                if (std::get<0>(pair.second) != CUmemGenericAllocationHandle{}) {
+                    ptrs_to_transfer.push_back(pair.first);
+                }
             }
-            return false;
+
+            for (void* ptr : ptrs_to_transfer) {
+                auto it = ptr_map_.find(ptr);
+                if (it != ptr_map_.end()) {
+                    auto const& [handle, size] = it->second;
+
+                    // Allocate pinned memory
+                    void* pinned_memory = nullptr;
+                    auto start_time = std::chrono::high_resolution_clock::now();
+                    cudaMallocHost(&pinned_memory, size);
+                    auto end_time = std::chrono::high_resolution_clock::now();
+                    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                    std::cout << "cudaMallocHost took " << duration.count() << " microseconds for size " << size << std::endl;
+
+                    // Copy data from device to pinned memory
+                    start_time = std::chrono::high_resolution_clock::now();
+                    cudaMemcpy(pinned_memory, ptr, size, cudaMemcpyDeviceToHost);
+                    end_time = std::chrono::high_resolution_clock::now();
+                    duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                    std::cout << "cudaMemcpy (DeviceToHost) took " << duration.count() << " microseconds for size " << size << std::endl;
+
+                    // Unmap the virtual address but don't free it
+                    start_time = std::chrono::high_resolution_clock::now();
+                    CUDA_CHECK(cuMemUnmap(reinterpret_cast<CUdeviceptr>(ptr), size));
+                    end_time = std::chrono::high_resolution_clock::now();
+                    duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                    std::cout << "cuMemUnmap took " << duration.count() << " microseconds for size " << size << std::endl;
+
+                    // Release the physical memory allocation handle
+                    start_time = std::chrono::high_resolution_clock::now();
+                    CUDA_CHECK(cuMemRelease(handle));
+                    end_time = std::chrono::high_resolution_clock::now();
+                    duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                    std::cout << "cuMemRelease took " << duration.count() << " microseconds for size " << size << std::endl;
+
+                    // Update the map to store a null handle, indicating it's now on host
+                    ptr_map_.erase(it);
+                    ptr_map_[ptr] = std::make_tuple(CUmemGenericAllocationHandle{}, size);
+
+                    // Store pinned memory pointer
+                    pinned_memory_map_[ptr] = pinned_memory;
+                }
+            }
+            return true;
         } catch (const std::exception& e) {
             std::cerr << "Exception in transferToPinnedMemory: " << e.what() << std::endl;
             return false;
         }
     }
 
-    bool CustomCudaAllocator::reallocateAndTransfer(void* ptr) noexcept {
-        if (!ptr) {
-            return false;
-        }
+    bool CustomCudaAllocator::reallocateAndTransfer() noexcept {
         try {
             std::lock_guard<std::mutex> lock(mtx_);
-            auto it = pinned_memory_map_.find(ptr);
-            if (it != pinned_memory_map_.end()) {
-                void* pinned_memory = it->second;
+            for (auto const& [ptr, pinned_memory] : pinned_memory_map_) {
                 auto size_it = ptr_map_.find(ptr);
                 if (size_it == ptr_map_.end()) {
-                    return false;
+                    // This should not happen if maps are consistent
+                    continue;
                 }
                 size_t size = std::get<1>(size_it->second);
 
-                // Allocate physical memory
+                // Re-allocate physical memory on the device
+                CUmemAllocationProp prop = {};
+                prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+                prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+                prop.location.id = device;
                 CUmemGenericAllocationHandle handle;
-                CUDA_CHECK(cuMemCreate(&handle, size, nullptr, 0));
 
-                // Map the physical memory to virtual address
-                CUdeviceptr va = 0;
-                CUDA_CHECK(cuMemMap(va, size, 0, handle, 0));
+                auto start_time = std::chrono::high_resolution_clock::now();
+                CUDA_CHECK(cuMemCreate(&handle, size, &prop, 0));
+                auto end_time = std::chrono::high_resolution_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                std::cout << "cuMemCreate took " << duration.count() << " microseconds for size " << size << std::endl;
 
-                // Set access flags for the mapping
-                CUmemAccessDesc access_desc = {};
-                access_desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-                access_desc.location.id = 0;
-                access_desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-                CUDA_CHECK(cuMemSetAccess(va, size, &access_desc, 1));
+                // Map the virtual address
+                start_time = std::chrono::high_resolution_clock::now();
+                CUDA_CHECK(cuMemMap(reinterpret_cast<CUdeviceptr>(ptr), size, 0, handle, 0));
+                end_time = std::chrono::high_resolution_clock::now();
+                duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                std::cout << "cuMemMap took " << duration.count() << " microseconds for size " << size << std::endl;
 
-                // Copy data from pinned memory to physical memory
-                (cudaMemcpy(reinterpret_cast<void*>(va), pinned_memory, size, cudaMemcpyHostToDevice));
+                // Set access permissions
+                CUmemAccessDesc accessDesc = {};
+                accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+                accessDesc.location.id = device;
+                accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                start_time = std::chrono::high_resolution_clock::now();
+                CUDA_CHECK(cuMemSetAccess(reinterpret_cast<CUdeviceptr>(ptr), size, &accessDesc, 1));
+                end_time = std::chrono::high_resolution_clock::now();
+                duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                std::cout << "cuMemSetAccess took " << duration.count() << " microseconds for size " << size << std::endl;
 
-                // Free pinned memory
+                // Copy data from pinned host memory back to device
+                start_time = std::chrono::high_resolution_clock::now();
+                cudaMemcpy(ptr, pinned_memory, size, cudaMemcpyHostToDevice);
+                end_time = std::chrono::high_resolution_clock::now();
+                duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                std::cout << "cudaMemcpy (HostToDevice) took " << duration.count() << " microseconds for size " << size << std::endl;
+
+                // Free the pinned host memory
+                start_time = std::chrono::high_resolution_clock::now();
                 cudaFreeHost(pinned_memory);
+                end_time = std::chrono::high_resolution_clock::now();
+                duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+                std::cout << "cudaFreeHost took " << duration.count() << " microseconds for size " << size << std::endl;
 
-                // Update maps
-                pinned_memory_map_.erase(it);
+                // Update ptr_map_ with the new device memory handle
                 ptr_map_[ptr] = std::make_tuple(handle, size);
-
-                return true;
             }
-            return false;
+            // Clear the pinned memory map as all have been transferred back
+            pinned_memory_map_.clear();
+            return true;
         } catch (const std::exception& e) {
             std::cerr << "Exception in reallocateAndTransfer: " << e.what() << std::endl;
             return false;
@@ -432,10 +473,10 @@ std::shared_ptr<KernelRegistry> NvExecutionProvider::GetKernelRegistry() const {
 
 // Per TensorRT documentation, logger needs to be a singleton.
 TensorrtLogger& GetTensorrtLogger(bool verbose_log) {
-  const auto log_level = verbose_log ? nvinfer1::ILogger::Severity::kVERBOSE : nvinfer1::ILogger::Severity::kWARNING;
+  const auto log_level = verbose_log ? nvinfer1::ILogger::Severity::kVERBOSE : nvinfer1::ILogger::Severity::kERROR;
   static TensorrtLogger trt_logger(log_level);
   if (log_level != trt_logger.get_level()) {
-    trt_logger.set_level(verbose_log ? nvinfer1::ILogger::Severity::kVERBOSE : nvinfer1::ILogger::Severity::kWARNING);
+    trt_logger.set_level(verbose_log ? nvinfer1::ILogger::Severity::kVERBOSE : nvinfer1::ILogger::Severity::kERROR);
   }
   return trt_logger;
 }
@@ -1302,7 +1343,7 @@ NvExecutionProvider::NvExecutionProvider(const NvExecutionProviderInfo& info)
     engine_decryption_lib_path_ = info.engine_decryption_lib_path;
   }
   force_sequential_engine_build_ = info.force_sequential_engine_build;
-  context_memory_sharing_enable_ = info.context_memory_sharing_enable;
+  context_memory_sharing_enable_ =  info.context_memory_sharing_enable;
   sparsity_enable_ = info.sparsity_enable;
   auxiliary_streams_ = info.auxiliary_streams;
   profile_min_shapes = info.profile_min_shapes;
@@ -2434,7 +2475,7 @@ common::Status NvExecutionProvider::RefitEngine(std::string onnx_model_filename,
   return Status::OK();
 }
 void NvExecutionProvider::Suspend()  {
-  // Synchronize CUDA stream to ensure all pending operations are completed
+  /*// Synchronize CUDA stream to ensure all pending operations are completed
   // engines_.emplace(fused_node.Name(), std::move(trt_engine));
   // deserialize the engine and save it to serialized_engines_
   for (auto& [name, engine] : engines_) {
@@ -2444,13 +2485,15 @@ void NvExecutionProvider::Suspend()  {
 
   contexts_.clear();
   // release the engines_
-  engines_.clear();
+  engines_.clear();*/
+
+  custom_cuda_allocator_.transferToPinnedMemory();
 
 }
 
 
 void NvExecutionProvider::Resume(){
-  // deserialize the engine and save it to engines_
+ /* // deserialize the engine and save it to engines_
   for (auto& [name, serialized_engine] : serialized_engines_) {
     auto engine = std::unique_ptr<nvinfer1::ICudaEngine>(runtime_->deserializeCudaEngine(serialized_engine->data(), serialized_engine->size()));
 
@@ -2486,7 +2529,8 @@ void NvExecutionProvider::Resume(){
   }
 
   // release the serialized_engines_
-  serialized_engines_.clear();
+  serialized_engines_.clear();*/
+  custom_cuda_allocator_.reallocateAndTransfer();
 }
 
 common::Status NvExecutionProvider::Compile(const std::vector<FusedNodeAndGraph>& fused_nodes_and_graphs,
@@ -2558,6 +2602,7 @@ Status NvExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphViewer& gr
   auto trt_config = std::unique_ptr<nvinfer1::IBuilderConfig>(trt_builder->createBuilderConfig());
   auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
   trt_parser->parse(string_buf.data(), string_buf.size(), model_path_);
+  std::cout << "parse done for " << model_path_ << std::endl;
   if (max_workspace_size_ > 0) {
     trt_config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, max_workspace_size_);
   }
@@ -2867,6 +2912,7 @@ Status NvExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphViewer& gr
     if (mem_size > max_ctx_mem_size_) {
       max_ctx_mem_size_ = mem_size;
     }
+    std::cout << "creating execution context size: " << mem_size << std::endl;
     trt_context = std::unique_ptr<nvinfer1::IExecutionContext>(trt_engine->createExecutionContext(nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED));
   } else {
     trt_context = std::unique_ptr<nvinfer1::IExecutionContext>(trt_engine->createExecutionContext());
