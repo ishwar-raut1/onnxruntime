@@ -34,7 +34,7 @@ struct OrtStatus {
 #include "core/providers/tensorrt/tensorrt_provider_options.h"
 #include "core/providers/nv_tensorrt_rtx/nv_provider_options.h"
 
-#if defined(USE_CUDA) || defined(USE_ROCM)
+#if defined(USE_CUDA) || defined(USE_ROCM) || defined(USE_NV)
 #define BACKEND_PROC "GPU"
 #else
 #define BACKEND_PROC "CPU"

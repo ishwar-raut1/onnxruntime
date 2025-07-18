@@ -3,7 +3,7 @@
 // Licensed under the MIT License.
 
 #include "core/providers/shared_library/provider_api.h"
-
+#include "core/common/common.h"
 #include "nv_data_transfer.h"
 
 #include "core/providers/cuda/shared_inc/cuda_call.h"
@@ -111,4 +111,42 @@ common::Status GPUDataTransfer::CopyTensorAsync(const Tensor& src, Tensor& dst, 
   return Status::OK();
 }
 
+bool ORT_API_CALL NvTensorRtRtxDataTransfer::CanCopyImpl(void* this_ptr,
+                                                          const OrtMemoryDevice* src_memory_device,
+                                                          const OrtMemoryDevice* dst_memory_device) noexcept {
+  auto& impl = *static_cast<NvTensorRtRtxDataTransfer*>(this_ptr);
+  // OrtMemoryDevice is a typedef/struct that inherits from OrtDevice, so we can safely cast.
+  // This allows us to use OrtDevice methods and comparisons.
+  const OrtDevice& src_device = static_cast<const OrtDevice&>(*src_memory_device);
+  const OrtDevice& dst_device = static_cast<const OrtDevice&>(*dst_memory_device);
+  return impl.gpu_data_transfer.CanCopy(src_device, dst_device);
+}
+
+OrtStatus* ORT_API_CALL NvTensorRtRtxDataTransfer::CopyTensorsImpl(void* this_ptr,
+                                                                    const OrtValue** src_tensors_ptr,
+                                                                    OrtValue** dst_tensors_ptr,
+                                                                    OrtSyncStream** streams_ptr,
+                                                                    size_t num_tensors) noexcept {
+  auto& impl = *static_cast<NvTensorRtRtxDataTransfer*>(this_ptr);
+
+  auto src_tensors = gsl::make_span<const OrtValue*>(src_tensors_ptr, num_tensors);
+  auto dst_tensors = gsl::make_span<OrtValue*>(dst_tensors_ptr, num_tensors);
+  auto streams = gsl::make_span<OrtSyncStream*>(streams_ptr, num_tensors);
+
+  for (size_t i = 0; i < num_tensors; ++i) {
+    const auto& src_tensor = src_tensors[i]->Get<Tensor>();
+    auto& dst_tensor = *dst_tensors[i]->GetMutable<Tensor>();
+
+    auto status = impl.gpu_data_transfer.CopyTensor(src_tensor, dst_tensor);
+    if (!status.IsOK()) {
+      return impl.CreateStatus(ORT_FAIL, "failed to copy tensor");
+    }
+  }
+
+  return nullptr;
+}
+
+void ORT_API_CALL NvTensorRtRtxDataTransfer::ReleaseImpl(void* this_ptr) noexcept {
+  delete static_cast<NvTensorRtRtxDataTransfer*>(this_ptr);
+}
 }  // namespace onnxruntime

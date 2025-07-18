@@ -1572,7 +1572,7 @@ bool CheckIfTensor(const std::vector<const NodeArg*>& def_list,
 }
 
 #if defined(USE_OPENVINO) || defined(USE_OPENVINO_PROVIDER_INTERFACE) || \
-    defined(USE_CUDA) || defined(USE_CUDA_PROVIDER_INTERFACE) || defined(USE_ROCM)
+    defined(USE_CUDA) || defined(USE_CUDA_PROVIDER_INTERFACE) || defined(USE_ROCM) || defined(USE_NV)
 static void LogDeprecationWarning(
     const std::string& deprecated, const optional<std::string>& alternative = nullopt) {
   LOGS_DEFAULT(WARNING) << "This is DEPRECATED and will be removed in the future: " << deprecated;
@@ -1711,6 +1711,7 @@ void addGlobalMethods(py::module& m) {
    * InferenceSession.set_providers(list_of_providers, list_of_provider_option_dicts)
    *
    */
+  //NOTE : these methods are marked as deprecated. thus , not adding them to the NV TRT RTX EP.
   // TODO remove deprecated global config
   m.def("set_cuda_device_id", [](const int id) {
     LogDeprecationWarning("set_cuda_device_id", "CUDA/ROCM execution provider option \"device_id\"");
@@ -1881,7 +1882,7 @@ void addObjectMethods(py::module& m, ExecutionProviderRegistrationFn ep_registra
                type = OrtDevice::GPU;
                vendor = OrtDevice::VendorIds::MICROSOFT;
              } else if (type == OrtDevice::GPU) {
-#if USE_CUDA
+#if USE_CUDA || USE_NV
                vendor = OrtDevice::VendorIds::NVIDIA;
 #elif USE_ROCM || USE_MIGRAPHX
                vendor = OrtDevice::VendorIds::AMD;

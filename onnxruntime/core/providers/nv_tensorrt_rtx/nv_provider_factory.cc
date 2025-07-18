@@ -12,7 +12,7 @@
 #include "core/providers/nv_tensorrt_rtx/nv_provider_options.h"
 #include "core/providers/nv_tensorrt_rtx/nv_execution_provider_custom_ops.h"
 #include <string.h>
-
+#include "nv_data_transfer.h"
 using namespace onnxruntime;
 
 namespace onnxruntime {
@@ -205,6 +205,12 @@ struct NvTensorRtRtxEpFactory : public OrtEpFactory, public ApiPtrs {
                                          &mem_info);
     assert(status == nullptr);  // should never fail.
     host_accessible_gpu_memory_info_ = MemoryInfoUniquePtr(mem_info, ort_api.ReleaseMemoryInfo);
+
+    data_transfer_impl_ = std::make_unique<NvTensorRtRtxDataTransfer>(
+        ort_api,
+        ep_api.MemoryInfo_GetMemoryDevice(default_gpu_memory_info_.get()),         // device memory
+        ep_api.MemoryInfo_GetMemoryDevice(host_accessible_gpu_memory_info_.get())  // shared memory
+    );
   }
 
   // Returns the name for the EP. Each unique factory configuration must have a unique name.
@@ -305,6 +311,7 @@ struct NvTensorRtRtxEpFactory : public OrtEpFactory, public ApiPtrs {
 
   MemoryInfoUniquePtr default_gpu_memory_info_;
   MemoryInfoUniquePtr host_accessible_gpu_memory_info_;
+  std::unique_ptr<NvTensorRtRtxDataTransfer> data_transfer_impl_;
 };
 
 extern "C" {
