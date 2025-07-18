@@ -7,6 +7,7 @@
 #include <atomic>
 #include "nv_execution_provider.h"
 #include "nv_provider_factory_creator.h"
+#include "nv_allocator.h"
 #include "core/framework/provider_options.h"
 #include "core/providers/nv_tensorrt_rtx/nv_provider_options.h"
 #include "core/providers/nv_tensorrt_rtx/nv_execution_provider_custom_ops.h"
@@ -152,19 +153,58 @@ ORT_API(onnxruntime::Provider*, GetProvider) {
 }
 
 #include "core/framework/error_code_helper.h"
+using MemoryInfoUniquePtr = std::unique_ptr<OrtMemoryInfo, std::function<void(OrtMemoryInfo*)>>;
+
+struct ApiPtrs {
+  const OrtApi& ort_api;
+  const OrtEpApi& ep_api;
+  const OrtModelEditorApi& model_editor_api;
+};
 
 // OrtEpApi infrastructure to be able to use the NvTensorRTRTX EP as an OrtEpFactory for auto EP selection.
-struct NvTensorRtRtxEpFactory : OrtEpFactory {
-  NvTensorRtRtxEpFactory(const OrtApi& ort_api_in,
-                         const char* ep_name,
+struct NvTensorRtRtxEpFactory : public OrtEpFactory, public ApiPtrs {
+  NvTensorRtRtxEpFactory(const char* ep_name,
+                         ApiPtrs apis,
                          OrtHardwareDeviceType hw_type)
-      : ort_api{ort_api_in}, ep_name{ep_name}, ort_hw_device_type{hw_type} {
+      : ApiPtrs(apis), ep_name{ep_name}, ort_hw_device_type{hw_type} {
     GetName = GetNameImpl;
     GetVendor = GetVendorImpl;
     GetVersion = GetVersionImpl;
     GetSupportedDevices = GetSupportedDevicesImpl;
     CreateEp = CreateEpImpl;
     ReleaseEp = ReleaseEpImpl;
+
+    CreateAllocator = CreateAllocatorImpl;
+    ReleaseAllocator = ReleaseAllocatorImpl;
+
+    OrtMemoryInfo* mem_info = nullptr;
+    // get current device id
+    int device_id = 0;
+    cudaError_t cuda_err = cudaGetDevice(&device_id);
+    if (cuda_err != cudaSuccess) {
+      ORT_THROW_IF_ERROR(ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
+
+                                         "Failed to get CUDA device id: ", cudaGetErrorString(cuda_err)));
+    }
+
+    auto* status = ort_api.CreateMemoryInfo_V2("NvTensorRTRTX GPU", OrtMemoryInfoDeviceType_GPU,
+                                               /*vendor*/ vendor_id, /* device_id */ (int16_t)device_id,
+                                               OrtDeviceMemoryType_DEFAULT,
+                                               /*alignment*/ 0,
+                                               OrtAllocatorType::OrtDeviceAllocator,
+                                               &mem_info);
+    assert(status == nullptr);  // should never fail.
+    default_gpu_memory_info_ = MemoryInfoUniquePtr(mem_info, ort_api.ReleaseMemoryInfo);
+
+    mem_info = nullptr;
+    status = ort_api.CreateMemoryInfo_V2("NvTensorRTRTX GPU pinned", OrtMemoryInfoDeviceType_GPU,
+                                         /*vendor*/ vendor_id, /* device_id */ (int16_t)device_id,
+                                         OrtDeviceMemoryType_HOST_ACCESSIBLE,
+                                         /*alignment*/ 0,
+                                         OrtAllocatorType::OrtDeviceAllocator,
+                                         &mem_info);
+    assert(status == nullptr);  // should never fail.
+    host_accessible_gpu_memory_info_ = MemoryInfoUniquePtr(mem_info, ort_api.ReleaseMemoryInfo);
   }
 
   // Returns the name for the EP. Each unique factory configuration must have a unique name.
@@ -213,13 +253,13 @@ struct NvTensorRtRtxEpFactory : OrtEpFactory {
     return nullptr;
   }
 
-  static OrtStatus* CreateEpImpl(OrtEpFactory* /*this_ptr*/,
-                                 _In_reads_(num_devices) const OrtHardwareDevice* const* /*devices*/,
-                                 _In_reads_(num_devices) const OrtKeyValuePairs* const* /*ep_metadata*/,
-                                 _In_ size_t /*num_devices*/,
-                                 _In_ const OrtSessionOptions* /*session_options*/,
-                                 _In_ const OrtLogger* /*logger*/,
-                                 _Out_ OrtEp** /*ep*/) {
+  static OrtStatus* ORT_API_CALL CreateEpImpl(OrtEpFactory* /*this_ptr*/,
+                                              _In_reads_(num_devices) const OrtHardwareDevice* const* /*devices*/,
+                                              _In_reads_(num_devices) const OrtKeyValuePairs* const* /*ep_metadata*/,
+                                              _In_ size_t /*num_devices*/,
+                                              _In_ const OrtSessionOptions* /*session_options*/,
+                                              _In_ const OrtLogger* /*logger*/,
+                                              _Out_ OrtEp** /*ep*/) {
     return onnxruntime::CreateStatus(ORT_INVALID_ARGUMENT, "[NvTensorRTRTX EP] EP factory does not support this method.");
   }
 
@@ -227,13 +267,44 @@ struct NvTensorRtRtxEpFactory : OrtEpFactory {
     // no-op as we never create an EP here.
   }
 
-  const OrtApi& ort_api;
+  static OrtStatus* ORT_API_CALL CreateAllocatorImpl(OrtEpFactory* this_ptr,
+                                                     const OrtMemoryInfo* memory_info,
+                                                     const OrtKeyValuePairs* /*allocator_options*/,
+                                                     OrtAllocator** allocator) noexcept {
+    auto& factory = *static_cast<NvTensorRtRtxEpFactory*>(this_ptr);
+    *allocator = nullptr;
+
+    if (memory_info == factory.default_gpu_memory_info_.get()) {
+      // create a GPU allocator. use the basic OrtAllocator for this example.
+      auto gpu_allocator = std::make_unique<CudaOrtAllocator>(memory_info, memory_info->device.Id(), "NvTensorRTRTX GPU");
+      *allocator = gpu_allocator.release();
+    } else if (memory_info == factory.host_accessible_gpu_memory_info_.get()) {
+      // create a pinned/shared memory allocator. Use the real device type (i.e. GPU/NPU) and id and a memory type of
+      // OrtDeviceMemoryType_HOST_ACCESSIBLE.
+      auto pinned_allocator = std::make_unique<CudaOrtPinnedAllocator>(memory_info, memory_info->device.Id(), "NvTensorRTRTX GPU pinned");
+      *allocator = pinned_allocator.release();
+    } else {
+      return factory.ort_api.CreateStatus(ORT_INVALID_ARGUMENT,
+                                          "INTERNAL ERROR! Unknown memory info provided to CreateAllocator. "
+                                          "Value did not come directly from an OrtEpDevice returned by this factory.");
+    }
+    return nullptr;
+  }
+
+  static void ORT_API_CALL ReleaseAllocatorImpl(OrtEpFactory* /*this_ptr*/,
+                                                OrtAllocator* allocator) noexcept {
+    delete allocator;
+  }
+
   const std::string ep_name;
   const std::string vendor{"NVIDIA"};
 
   // NVIDIA vendor ID. Refer to the ACPI ID registry (search NVIDIA): https://uefi.org/ACPI_ID_List
   const uint32_t vendor_id{0x10de};
   const OrtHardwareDeviceType ort_hw_device_type;  // Supported OrtHardwareDevice
+
+  MemoryInfoUniquePtr default_gpu_memory_info_;
+  MemoryInfoUniquePtr host_accessible_gpu_memory_info_;
 };
 
 extern "C" {
@@ -245,9 +316,10 @@ OrtStatus* CreateEpFactories(const char* /*registration_name*/, const OrtApiBase
   const OrtApi* ort_api = ort_api_base->GetApi(ORT_API_VERSION);
 
   // Factory could use registration_name or define its own EP name.
-  auto factory_gpu = std::make_unique<NvTensorRtRtxEpFactory>(*ort_api,
-                                                              onnxruntime::kNvTensorRTRTXExecutionProvider,
-                                                              OrtHardwareDeviceType_GPU);
+  auto factory_gpu = std::make_unique<NvTensorRtRtxEpFactory>(
+      onnxruntime::kNvTensorRTRTXExecutionProvider,
+      ApiPtrs{*ort_api, *ort_api->GetEpApi(), *ort_api->GetModelEditorApi()},
+      OrtHardwareDeviceType_GPU);
 
   if (max_factories < 1) {
     return ort_api->CreateStatus(ORT_INVALID_ARGUMENT,

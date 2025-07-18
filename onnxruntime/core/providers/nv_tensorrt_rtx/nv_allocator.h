@@ -63,4 +63,68 @@ class CUDAPinnedAllocator : public IAllocator {
   void* Alloc(size_t size) override;
   void Free(void* p) override;
 };
+
+struct CudaOrtAllocator : public OrtAllocator {
+  CudaOrtAllocator(const OrtMemoryInfo* memory_info, OrtDevice::DeviceId device_id, const char* name)
+      : memory_info(memory_info) {
+    cuda_allocator = new CUDAAllocator(device_id, name);
+    Alloc = AllocImpl;
+    Free = FreeImpl;
+    Info = InfoImpl;
+    Reserve = ReserveImpl;
+  }
+  ~CudaOrtAllocator() {
+    delete cuda_allocator;
+  }
+  static void* ORT_API_CALL AllocImpl(struct OrtAllocator* this_, size_t size) {
+    const CudaOrtAllocator* impl = static_cast<const CudaOrtAllocator*>(this_);
+    return impl->cuda_allocator->Alloc(size);
+  }
+  static void ORT_API_CALL FreeImpl(struct OrtAllocator* this_, void* p) {
+    const CudaOrtAllocator* impl = static_cast<const CudaOrtAllocator*>(this_);
+    return impl->cuda_allocator->Free(p);
+  }
+  static const OrtMemoryInfo* ORT_API_CALL InfoImpl(const struct OrtAllocator* this_) {
+    const CudaOrtAllocator* impl = static_cast<const CudaOrtAllocator*>(this_);
+    return impl->memory_info;
+  }
+  static void* ORT_API_CALL ReserveImpl(struct OrtAllocator* this_, size_t size) {
+    const CudaOrtAllocator* impl = static_cast<const CudaOrtAllocator*>(this_);
+    return impl->cuda_allocator->Reserve(size);
+  }
+  const OrtMemoryInfo* memory_info;
+  CUDAAllocator* cuda_allocator;
+};
+
+struct CudaOrtPinnedAllocator : public OrtAllocator {
+  CudaOrtPinnedAllocator(const OrtMemoryInfo* memory_info, OrtDevice::DeviceId device_id, const char* name)
+      : memory_info(memory_info) {
+    cuda_allocator = new CUDAPinnedAllocator(device_id, name);
+    Alloc = AllocImpl;
+    Free = FreeImpl;
+    Info = InfoImpl;
+    Reserve = ReserveImpl;
+  }
+  ~CudaOrtPinnedAllocator() {
+    delete cuda_allocator;
+  }
+  static void* ORT_API_CALL AllocImpl(struct OrtAllocator* this_, size_t size) {
+    const CudaOrtPinnedAllocator* impl = static_cast<const CudaOrtPinnedAllocator*>(this_);
+    return impl->cuda_allocator->Alloc(size);
+  }
+  static void ORT_API_CALL FreeImpl(struct OrtAllocator* this_, void* p) {
+    const CudaOrtPinnedAllocator* impl = static_cast<const CudaOrtPinnedAllocator*>(this_);
+    return impl->cuda_allocator->Free(p);
+  }
+  static const OrtMemoryInfo* ORT_API_CALL InfoImpl(const struct OrtAllocator* this_) {
+    const CudaOrtPinnedAllocator* impl = static_cast<const CudaOrtPinnedAllocator*>(this_);
+    return impl->memory_info;
+  }
+  static void* ORT_API_CALL ReserveImpl(struct OrtAllocator* this_, size_t size) {
+    const CudaOrtPinnedAllocator* impl = static_cast<const CudaOrtPinnedAllocator*>(this_);
+    return impl->cuda_allocator->Reserve(size);
+  }
+  const OrtMemoryInfo* memory_info;
+  CUDAPinnedAllocator* cuda_allocator;
+};
 }  // namespace onnxruntime
