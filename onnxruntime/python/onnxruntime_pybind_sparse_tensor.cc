@@ -348,7 +348,7 @@ void addSparseTensorMethods(pybind11::module& m) {
   /// - if this sparse tensor is already on GPU
   /// - if CUDA is not present in this build
   /// - if the specified device is not valid
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_NV)
       .def("to_cuda", [](const PySparseTensor* py_tensor, const OrtDevice& ort_device) -> std::unique_ptr<PySparseTensor> {
         const SparseTensor& sparse_tensor = py_tensor->Instance();
         if (sparse_tensor.IsDataTypeString()) {
