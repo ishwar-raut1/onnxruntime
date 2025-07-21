@@ -16,6 +16,7 @@
 #include "core/framework/TensorSeq.h"
 #include "core/framework/data_types.h"
 #include "core/framework/onnxruntime_typeinfo.h"
+#include "core/session/allocator_adapters.h"
 
 #include "core/framework/data_transfer_utils.h"
 #include "core/framework/data_types_internal.h"
@@ -204,6 +205,112 @@ std::unique_ptr<IDataTransfer> GetGPUDataTransfer() {
   return GetProviderInfo_CUDA().CreateGPUDataTransfer();
 }
 
+#endif
+
+#ifdef USE_NV
+
+void CpuToNvCudaMemCpy(void* dst, const void* src, size_t num_bytes) {
+
+    // get DataTransferManager from the environment
+    auto& env = GetEnv();
+    const auto& data_transfer_mgr = env.GetDataTransferManager();
+    // You can now use data_transfer_mgr to perform data transfers if needed
+
+    // Create Tensor objects for src and dst with size num_bytes
+    // Assume src is host (CPU) memory and dst is device (GPU) memory
+
+    // Create OrtMemoryInfo for CPU and GPU
+    OrtMemoryInfo cpu_mem_info("Cpu", OrtAllocatorType::OrtDeviceAllocator, OrtDevice());
+    OrtDevice gpu_device(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::NVIDIA, 0);
+    OrtMemoryInfo gpu_mem_info("Cuda", OrtAllocatorType::OrtDeviceAllocator, gpu_device);
+
+    // The data is just a byte buffer, so use uint8_t as the element type
+    std::vector<int64_t> shape{static_cast<int64_t>(num_bytes)};
+
+
+    // ❗ FIX: Create an onnxruntime::TensorShape object from the vector
+    onnxruntime::TensorShape tensor_shape(shape);
+
+    // Create Tensor for src (CPU)
+    onnxruntime::Tensor src_tensor(onnxruntime::DataTypeImpl::GetType<uint8_t>(), tensor_shape, const_cast<void*>(src), cpu_mem_info);
+    // Create Tensor for dst (GPU)
+    onnxruntime::Tensor dst_tensor(onnxruntime::DataTypeImpl::GetType<uint8_t>(), tensor_shape, dst, gpu_mem_info);
+
+    // Use DataTransferManager to copy from src_tensor to dst_tensor
+    auto status = data_transfer_mgr.CopyTensor(src_tensor, dst_tensor);
+    if (!status.IsOK()) {
+      ORT_THROW("Failed to copy tensor from CPU to NV CUDA: ", status.ErrorMessage());
+    }
+
+
+}
+
+void NvCudaToCpuMemCpy(void* dst, const void* src, size_t num_bytes) {
+   //CUDA_CALL_THROW(cudaMemcpy(dst, src, num_bytes, cudaMemcpyDeviceToHost));
+
+    //  get DataTransferManager from the environment
+    auto& env = GetEnv();
+    const auto& data_transfer_mgr = env.GetDataTransferManager();
+
+    // Create OrtMemoryInfo for GPU and CPU
+    OrtDevice gpu_device(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::NVIDIA, 0);
+    OrtMemoryInfo gpu_mem_info("Cuda", OrtAllocatorType::OrtDeviceAllocator, gpu_device);
+    OrtMemoryInfo cpu_mem_info("Cpu", OrtAllocatorType::OrtDeviceAllocator, OrtDevice());
+    // Create Tensor objects for src and dst with size num_bytes
+    // Assume src is device (GPU) memory and dst is host (CPU) memory
+
+    std::vector<int64_t> shape = {static_cast<int64_t>(num_bytes)};
+
+    // ❗ FIX: Create an onnxruntime::TensorShape object from the vector
+    onnxruntime::TensorShape tensor_shape(shape);
+
+    onnxruntime::Tensor src_tensor(onnxruntime::DataTypeImpl::GetType<uint8_t>(), tensor_shape, const_cast<void*>(src), gpu_mem_info);
+    onnxruntime::Tensor dst_tensor(onnxruntime::DataTypeImpl::GetType<uint8_t>(), tensor_shape, dst, cpu_mem_info);
+
+    // Use DataTransferManager to copy from src_tensor to dst_tensor
+    auto status = data_transfer_mgr.CopyTensor(src_tensor, dst_tensor);
+    if (!status.IsOK()) {
+      ORT_THROW("Failed to copy tensor from NV CUDA to CPU: ", status.ErrorMessage());
+    }
+
+}
+
+const std::unordered_map<OrtDevice::DeviceType, MemCpyFunc>* GetNvCudaToHostMemCpyFunction() {
+  static std::unordered_map<OrtDevice::DeviceType, MemCpyFunc> map{
+      {OrtDevice::GPU, NvCudaToCpuMemCpy}};
+
+  return &map;
+}
+
+
+AllocatorPtr GetNvAllocator(OrtDevice::DeviceId id) {
+
+  static auto* id_to_allocator_map = std::make_unique<std::unordered_map<OrtDevice::DeviceId, AllocatorPtr>>().release();
+
+  auto hit = id_to_allocator_map->find(id);
+  if (hit == id_to_allocator_map->end()) {
+    // TODO: Expose knobs so that users can set fields associated with OrtArenaCfg so that we can pass it to the following method
+    auto cuda_allocator = GetProviderInfo_CUDA().CreateCudaAllocator(id, gpu_mem_limit, arena_extend_strategy, external_allocator_info, nullptr);
+    hit = id_to_allocator_map->emplace(id, std::move(cuda_allocator)).first;
+
+    OrtDevice device(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::NVIDIA,
+                     id);
+    OrtMemoryInfo mem_info("", OrtAllocatorType::OrtDeviceAllocator, device);
+    auto& env = GetEnv();
+    OrtAllocator* allocator = nullptr;
+    auto status = env.GetSharedAllocator(mem_info, allocator);
+    if (!status.IsOK()) {
+      ORT_THROW("Failed to get shared allocator for device ", id);
+    }
+    auto allocator_ptr = std::make_shared<IAllocatorImplWrappingOrtAllocator>(allocator);
+    // check if the allocator is already registered
+
+    hit->second = allocator_ptr;
+  }
+
+  return hit->second;
+
+}
 #endif
 
 #ifdef USE_MIGRAPHX

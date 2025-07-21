@@ -79,6 +79,18 @@ std::unique_ptr<IDataTransfer> GetGPUDataTransfer();
 
 #endif
 
+#ifdef USE_NV
+
+void CpuToNvCudaMemCpy(void* dst, const void* src, size_t num_bytes);
+
+void NvCudaToCpuMemCpy(void* dst, const void* src, size_t num_bytes);
+
+const std::unordered_map<OrtDevice::DeviceType, MemCpyFunc>* GetNvCudaToHostMemCpyFunction();
+
+AllocatorPtr GetNvAllocator(OrtDevice::DeviceId id);
+
+#endif
+
 #ifdef USE_DML
 
 AllocatorPtr GetDmlAllocator(OrtDevice::DeviceId id);

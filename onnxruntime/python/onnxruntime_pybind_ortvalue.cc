@@ -31,6 +31,8 @@ std::unique_ptr<OrtValue> OrtValueFromShapeAndType(const std::vector<int64_t>& s
       throw std::runtime_error("The provided device id doesn't match any available GPUs on the machine.");
     }
     allocator = GetCudaAllocator(device.Id());
+#elif USE_NV
+    allocator = GetNvAllocator(device.Id());
 #else
     throw std::runtime_error(
         "Can't allocate memory on the CUDA device using this package of OnnxRuntime. "
